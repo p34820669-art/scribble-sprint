@@ -13,8 +13,8 @@
   --hand:'Patrick Hand','Comic Sans MS',cursive;
   color-scheme:light;
 }
+[hidden]{display:none!important}
 html,body{height:100%;margin:0}
-body{box-sizing:border-box}
 body{background:var(--paper);color:var(--ink);font-family:var(--hand);padding-inline:16px;padding-block:16px;display:flex;align-items:center;justify-content:center;
   background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:28px 28px}
 .stage{position:relative;width:100%;max-width:960px;aspect-ratio:5/2;background:var(--paper);border:3px solid var(--ink);border-radius:6px 14px 8px 12px;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none;box-shadow:6px 7px 0 var(--ink)}
@@ -58,7 +58,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--pencil);outline
 </div>
 <script>
 (function(){
-  var W=1000,H=400,GY=320,cv=document.getElementById('c'),ctx=cv.getContext('2d');
+  var narrow=window.innerWidth<640,W=narrow?600:1000,H=narrow?520:400,GY=H-80,cv=document.getElementById('c'),ctx=cv.getContext('2d');
+  cv.width=W;cv.height=H;document.getElementById('stage').style.aspectRatio=W+'/'+H;
   var LINK='https://p34820669-art.github.io/scribble-sprint/';
   var INK='#22303f',PEN='#d8432f',MARK='#ffe066',PENCIL='#4b7bb5',PAPER='#f3f5ee';
   var elScore=document.getElementById('score'),elBest=document.getElementById('best'),chip=document.getElementById('chip');
@@ -190,8 +191,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--pencil);outline
     for(var y=0;y<H;y+=28){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
     // sun doodle
     ctx.strokeStyle=PEN;ctx.lineWidth=2.5;
-    circle(820,90,32,MARK);
-    for(var r=0;r<10;r++){var a=r*.628+S.t*.4;line(820+Math.cos(a)*42,90+Math.sin(a)*42,820+Math.cos(a)*56,90+Math.sin(a)*56,2);}
+    circle(W-180,90,32,MARK);
+    for(var r=0;r<10;r++){var a=r*.628+S.t*.4;line(W-180+Math.cos(a)*42,90+Math.sin(a)*42,W-180+Math.cos(a)*56,90+Math.sin(a)*56,2);}
     // clouds
     ctx.strokeStyle=PENCIL;ctx.lineWidth=2.5;
     var co=(d*.12)%1300;
