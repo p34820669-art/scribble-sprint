@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Scribble Sprint</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Patrick+Hand&display=swap">
+<style>
+/* Layout: one centered notebook-page stage; HUD and overlays in DOM over a canvas. Single committed sketchbook look. */
+:root{
+  --paper:#f3f5ee; --grid:#c7d8e6; --ink:#22303f; --pen:#d8432f; --marker:#ffe066; --pencil:#4b7bb5;
+  --display:'Permanent Marker','Marker Felt',cursive;
+  --hand:'Patrick Hand','Comic Sans MS',cursive;
+  color-scheme:light;
+}
+html,body{height:100%;margin:0}
+body{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--hand);padding-inline:16px;padding-block:16px;display:flex;align-items:center;justify-content:center;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:28px 28px}
+.stage{position:relative;width:100%;max-width:960px;aspect-ratio:5/2;background:var(--paper);border:3px solid var(--ink);border-radius:6px 14px 8px 12px;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none;box-shadow:6px 7px 0 var(--ink)}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hud{position:absolute;top:3%;left:3%;right:3%;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:clamp(13px,2.4vw,20px);pointer-events:none;font-variant-numeric:tabular-nums}
+.hud b{font-family:var(--display);font-weight:400;font-size:clamp(20px,4.4vw,38px);display:block;line-height:1.1}
+.hud div:last-child{text-align:right}
+.chip{align-self:center;background:var(--marker);border:2px solid var(--ink);border-radius:999px;padding:.1em .8em;font-size:clamp(12px,2.2vw,18px)}
+.snd{position:absolute;bottom:3%;right:2.5%;font-size:clamp(12px,2vw,16px);background:transparent;color:var(--ink);border:2px solid var(--ink);padding:.15em .8em;box-shadow:none}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(4px,1.2vw,10px);text-align:center;background:#f3f5eeeb;padding:16px}
+.overlay h1{font-family:var(--display);font-weight:400;font-size:clamp(28px,7.5vw,68px);margin:0;line-height:1;text-wrap:balance;transform:rotate(-2deg)}
+.overlay h1 span{background:linear-gradient(transparent 55%,var(--marker) 55%)}
+.by{margin:0;font-size:clamp(16px,3.2vw,28px);color:var(--pen)}
+.overlay p{margin:0;font-size:clamp(13px,2.2vw,19px);font-variant-numeric:tabular-nums}
+.row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:clamp(2px,1vw,10px)}
+button{font-family:var(--display);font-size:clamp(14px,2.6vw,22px);background:var(--pen);color:#fff;border:3px solid var(--ink);border-radius:12px 6px 14px 8px;padding:.4em 1.4em;cursor:pointer;box-shadow:3px 3px 0 var(--ink)}
+button.alt{background:var(--paper);color:var(--ink)}
+button:hover{transform:translate(-1px,-1px)}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--pencil);outline-offset:3px}
+.link{font-family:var(--hand);font-size:clamp(12px,2vw,16px);width:min(90%,420px);padding:.3em .6em;border:2px solid var(--ink);background:#fff;color:var(--ink);border-radius:6px}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <canvas id="c" width="1000" height="400"></canvas>
+  <div class="hud"><div>Distance<b id="score">0 m</b></div><div class="chip" id="chip" hidden>Shield on</div><div>Best<b id="best">0 m</b></div></div>
+  <button class="snd alt" id="snd" type="button" aria-pressed="false">Sound on</button>
+  <div class="overlay" id="start">
+    <h1><span>Scribble Sprint</span></h1>
+    <p class="by">a doodle game by Alan</p>
+    <p>Tap or press Space to jump. Grab the star for a shield.</p>
+    <p id="startBest"></p>
+    <div class="row"><button id="go" type="button">Run</button><button class="alt share" type="button">Share</button></div>
+  </div>
+  <div class="overlay" id="over" hidden>
+    <h1><span>Game over</span></h1>
+    <p id="final"></p>
+    <div class="row"><button id="again" type="button">Restart</button><button class="alt share" type="button">Share</button></div>
+  </div>
+</div>
+<script>
+(function(){
+  var W=1000,H=400,GY=320,cv=document.getElementById('c'),ctx=cv.getContext('2d');
+  var LINK='https://p34820669-art.github.io/scribble-sprint/';
+  var INK='#22303f',PEN='#d8432f',MARK='#ffe066',PENCIL='#4b7bb5',PAPER='#f3f5ee';
+  var elScore=document.getElementById('score'),elBest=document.getElementById('best'),chip=document.getElementById('chip');
+  var start=document.getElementById('start'),over=document.getElementById('over'),final=document.getElementById('final'),startBest=document.getElementById('startBest');
+  var GRAV=2600,JUMP=900,PX=140,PW=34,PH=48;
+  var best=0,muted=false;
+  try{best=+localStorage.getItem('scribble-best')||0;muted=localStorage.getItem('scribble-muted')==='1'}catch(e){}
+  function showBest(){elBest.textContent=best+' m';startBest.textContent=best?'Your best: '+best+' m':'No score yet. Go set one.';}
+  showBest();
+  var S,state='idle',last=0,overAt=0;
+
+  /* ---------- sound (Web Audio, created on first interaction) ---------- */
+  var AC=null;
+  function ac(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==='suspended')AC.resume();return AC;}
+  function tone(f0,f1,dur,type,vol,delay){
+    if(muted)return;var a=ac();if(!a)return;
+    var t=a.currentTime+(delay||0),o=a.createOscillator(),g=a.createGain();
+    o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+    g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    o.connect(g);g.connect(a.destination);o.start(t);o.stop(t+dur+.02);
+  }
+  var sfx={
+    jump:function(){tone(320,640,.12,'triangle',.18)},
+    star:function(){tone(660,660,.09,'square',.08,0);tone(880,880,.09,'square',.08,.09);tone(1320,1320,.16,'square',.08,.18)},
+    pop:function(){tone(500,90,.25,'sawtooth',.14)},
+    die:function(){tone(300,55,.45,'sawtooth',.16)}
+  };
+  var sndBtn=document.getElementById('snd');
+  function syncSnd(){sndBtn.textContent=muted?'Sound off':'Sound on';sndBtn.setAttribute('aria-pressed',muted?'true':'false');}
+  syncSnd();
+  sndBtn.addEventListener('click',function(){muted=!muted;syncSnd();try{localStorage.setItem('scribble-muted',muted?'1':'0')}catch(e){}if(!muted)sfx.jump();});
+
+  /* ---------- game state ---------- */
+  function reset(){S={y:GY-PH,vy:0,ground:true,coyote:0,dist:0,speed:340,gaps:[],obs:[],stars:[],next:700,nextStar:1800,t:0,fallen:false,buffer:0,shield:false,poof:0};chip.hidden=true;}
+  reset();
+
+  function spawn(){
+    var sp=S.speed,air=2*JUMP/GRAV;
+    if(Math.random()<.4){
+      var w=70+Math.random()*(Math.min(190,sp*air*.62)-70);
+      S.gaps.push({x:W+20,w:w});S.next=w+sp*.75+Math.random()*sp*.55;
+    }else{
+      var h=32+Math.random()*38,ww=26+Math.random()*26;
+      S.obs.push({x:W+20,w:ww,h:h,s:Math.random()});S.next=ww+sp*.7+Math.random()*sp*.6;
+    }
+  }
+
+  function jump(){
+    ac();
+    if(state==='idle'){begin();return;}
+    if(state==='over'){if(performance.now()-overAt>350)begin();return;}
+    if(state!=='play')return;
+    if(S.ground||S.coyote>0){S.vy=-JUMP;S.ground=false;S.coyote=0;S.buffer=0;sfx.jump();}else S.buffer=.12;
+  }
+  function release(){if(state==='play'&&S.vy<-320)S.vy=-320;}
+  function begin(){ac();reset();state='play';start.hidden=true;over.hidden=true;last=performance.now();requestAnimationFrame(loop);}
+  function die(){
+    state='over';overAt=performance.now();sfx.die();chip.hidden=true;
+    var d=Math.floor(S.dist/10),isNew=d>best;
+    if(isNew){best=d;try{localStorage.setItem('scribble-best',best)}catch(e){}}
+    showBest();
+    final.textContent=d+' m'+(isNew?'  ·  new best!':'  ·  best '+best+' m');
+    over.hidden=false;draw();
+  }
+  function supported(){
+    var l=PX+6,r=PX+PW-6;
+    for(var i=0;i<S.gaps.length;i++){var g=S.gaps[i];if(l>g.x&&r<g.x+g.w)return false;}
+    return true;
+  }
+
+  function update(dt){
+    S.t+=dt;S.speed=Math.min(340+S.dist*.05,860);
+    var dx=S.speed*dt;S.dist+=dx;S.next-=dx;S.nextStar-=dx;S.poof=Math.max(0,S.poof-dt);
+    S.gaps.forEach(function(g){g.x-=dx});S.obs.forEach(function(o){o.x-=dx});S.stars.forEach(function(s){s.x-=dx});
+    S.gaps=S.gaps.filter(function(g){return g.x+g.w>-20});S.obs=S.obs.filter(function(o){return o.x+o.w>-20});S.stars=S.stars.filter(function(s){return s.x>-30});
+    if(S.next<=0)spawn();
+    if(S.nextStar<=0){S.stars.push({x:W+20,y:GY-95-Math.random()*40});S.nextStar=2600+Math.random()*2200;}
+    var was=S.ground;
+    S.vy+=GRAV*dt;S.y+=S.vy*dt;S.coyote=Math.max(0,S.coyote-dt);S.buffer=Math.max(0,S.buffer-dt);
+    S.ground=false;
+    if(S.y+PH>=GY&&S.vy>=0&&!S.fallen){
+      if(supported()){S.y=GY-PH;S.vy=0;S.ground=true;if(S.buffer>0){S.vy=-JUMP;S.ground=false;S.buffer=0;sfx.jump();}}
+      else if(S.y+PH>GY+8)S.fallen=true;
+    }
+    if(was&&!S.ground&&S.vy>=0&&!S.fallen)S.coyote=.08;
+    if(S.y>H+20){die();return;}
+    if(!S.fallen){
+      for(var i=0;i<S.obs.length;i++){
+        var o=S.obs[i];
+        if(PX+PW-5>o.x+3&&PX+5<o.x+o.w-3&&S.y+PH-3>GY-o.h+3){
+          if(S.shield){S.shield=false;chip.hidden=true;S.obs.splice(i,1);S.poof=.4;sfx.pop();break;}
+          die();return;
+        }
+      }
+      for(i=0;i<S.stars.length;i++){
+        var s=S.stars[i],cx=PX+PW/2,cy=S.y+PH/2;
+        if(Math.abs(s.x-cx)<30&&Math.abs(s.y-cy)<40){S.stars.splice(i,1);S.shield=true;chip.hidden=false;sfx.star();break;}
+      }
+    }
+    elScore.textContent=Math.floor(S.dist/10)+' m';
+  }
+
+  /* ---------- sketchy drawing: seeded jitter that "boils" ~8 times a second ---------- */
+  var seed=1;
+  function rnd(){seed=(seed*16807)%2147483647;return seed/2147483647-.5;}
+  function line(x1,y1,x2,y2,j){j=j||1.6;ctx.beginPath();ctx.moveTo(x1+rnd()*j,y1+rnd()*j);ctx.lineTo((x1+x2)/2+rnd()*j*1.5,(y1+y2)/2+rnd()*j*1.5);ctx.lineTo(x2+rnd()*j,y2+rnd()*j);ctx.stroke();}
+  function circle(x,y,r,fill){
+    for(var p=0;p<2;p++){
+      ctx.beginPath();var st=rnd()*6;
+      for(var a=0;a<=13;a++){var t=st+a/12*6.6,rr=r+rnd()*1.8;var px=x+Math.cos(t)*rr,py=y+Math.sin(t)*rr;a?ctx.lineTo(px,py):ctx.moveTo(px,py);}
+      if(p===0&&fill){ctx.fillStyle=fill;ctx.fill();}
+      ctx.stroke();
+    }
+  }
+  function star(x,y,r){
+    ctx.beginPath();
+    for(var i=0;i<10;i++){var a=-Math.PI/2+i*Math.PI/5,rr=i%2?r*.45:r;var px=x+Math.cos(a)*rr+rnd()*1.5,py=y+Math.sin(a)*rr+rnd()*1.5;i?ctx.lineTo(px,py):ctx.moveTo(px,py);}
+    ctx.closePath();ctx.fillStyle=MARK;ctx.fill();ctx.stroke();
+  }
+
+  function draw(){
+    seed=Math.floor(performance.now()/125)%9973+1;
+    ctx.clearRect(0,0,W,H);ctx.lineCap='round';ctx.lineJoin='round';
+    var d=S.dist;
+    // graph-paper grid, scrolls slowly
+    ctx.strokeStyle='#c7d8e6';ctx.lineWidth=1;
+    var go=(d*.25)%28;
+    for(var x=-go;x<W;x+=28){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(var y=0;y<H;y+=28){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    // sun doodle
+    ctx.strokeStyle=PEN;ctx.lineWidth=2.5;
+    circle(820,90,32,MARK);
+    for(var r=0;r<10;r++){var a=r*.628+S.t*.4;line(820+Math.cos(a)*42,90+Math.sin(a)*42,820+Math.cos(a)*56,90+Math.sin(a)*56,2);}
+    // clouds
+    ctx.strokeStyle=PENCIL;ctx.lineWidth=2.5;
+    var co=(d*.12)%1300;
+    [[200,70],[620,110],[1000,60]].forEach(function(c){
+      var cx=((c[0]-co)%1300+1300)%1300-150;
+      ctx.beginPath();ctx.arc(cx,c[1],18,3.2,6.1);ctx.arc(cx+28,c[1]-8,22,3.4,6.2);ctx.arc(cx+58,c[1],17,3.6,6.4);ctx.stroke();
+    });
+    // ground
+    ctx.strokeStyle=INK;ctx.lineWidth=3.5;
+    var gs=S.gaps.slice().sort(function(a,b){return a.x-b.x}),cx0=0,segs=[];
+    gs.forEach(function(gp){if(gp.x>cx0)segs.push([cx0,gp.x]);cx0=Math.max(cx0,gp.x+gp.w)});
+    if(cx0<W)segs.push([cx0,W]);
+    segs.forEach(function(s){
+      line(s[0],GY,s[1],GY,2.2);
+      ctx.lineWidth=1.8;
+      var o=((d%22)+22)%22;
+      for(var x=s[0]-o+22;x<s[1];x+=22){if(x<s[0]+4)continue;line(x,GY+6,x-9,GY+22,2);}
+      ctx.lineWidth=3.5;
+    });
+    ctx.strokeStyle=PEN;ctx.lineWidth=2.5;
+    gs.forEach(function(g){
+      // red scribble-out hazard inside each gap
+      for(var x=Math.max(g.x,0)+8;x<Math.min(g.x+g.w,W)-4;x+=14)line(x,GY+6,x+8,GY+44,3);
+    });
+    // spikes
+    ctx.strokeStyle=INK;ctx.lineWidth=3;
+    S.obs.forEach(function(o){
+      ctx.beginPath();ctx.moveTo(o.x,GY);ctx.lineTo(o.x+o.w/2+rnd()*2,GY-o.h);ctx.lineTo(o.x+o.w,GY);ctx.closePath();
+      ctx.fillStyle='#fff';ctx.fill();ctx.stroke();
+      ctx.strokeStyle=PEN;ctx.lineWidth=2;
+      for(var hy=6;hy<o.h-4;hy+=7){var f=1-hy/o.h;line(o.x+o.w/2-o.w/2*f+3,GY-hy,o.x+o.w/2+o.w/2*f-3,GY-hy,1.4);}
+      ctx.strokeStyle=INK;ctx.lineWidth=3;
+    });
+    // stars
+    ctx.strokeStyle=INK;ctx.lineWidth=2.5;
+    S.stars.forEach(function(s){star(s.x,s.y+Math.sin(S.t*4+s.x*.01)*6,16);});
+    // player: doodle stick figure
+    var px=PX+PW/2,py=S.y,run=S.ground?Math.sin(S.t*20):0,air=!S.ground,hipY=py+PH-16;
+    ctx.strokeStyle=INK;ctx.lineWidth=3.5;
+    circle(px,py+13,13,'#fff');
+    line(px+5,py+11,px+5,py+14,1);
+    line(px,py+26,px,hipY,1.5);
+    if(air){line(px,py+30,px-14,py+22,1.5);line(px,py+30,px+15,py+20,1.5);line(px,hipY,px-10,hipY+14,1.5);line(px,hipY,px+12,hipY+12,1.5);}
+    else{line(px,py+30,px-10*run,py+40,1.5);line(px,py+30,px+10*run,py+40,1.5);line(px,hipY,px-13*run,py+PH,1.5);line(px,hipY,px+13*run,py+PH,1.5);}
+    ctx.strokeStyle=PEN;ctx.lineWidth=4;
+    line(px-6,py+25,px-24,py+29+(air?-6:run*3),2);
+    // shield bubble
+    if(S.shield){ctx.strokeStyle=PENCIL;ctx.lineWidth=2.5;ctx.setLineDash([7,6]);circle(px,py+PH/2,38,null);ctx.setLineDash([]);}
+    if(S.poof>0){ctx.strokeStyle=PEN;ctx.lineWidth=3;for(var k=0;k<8;k++){var aa=k*.785,rr=20+(.4-S.poof)*110;line(px+40+Math.cos(aa)*rr*.5,py+PH/2+Math.sin(aa)*rr*.5,px+40+Math.cos(aa)*rr,py+PH/2+Math.sin(aa)*rr,1.5);}}
+  }
+
+  function loop(t){
+    if(state!=='play')return;
+    var dt=Math.min((t-last)/1000,.033);last=t;
+    update(dt);if(state==='play'){draw();requestAnimationFrame(loop);}
+  }
+
+  /* ---------- input ---------- */
+  document.addEventListener('keydown',function(e){
+    if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){
+      if(e.target&&(e.target.tagName==='BUTTON'||e.target.tagName==='INPUT'))return;
+      e.preventDefault();if(!e.repeat)jump();
+    }
+  });
+  document.addEventListener('keyup',function(e){if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')release();});
+  var stage=document.getElementById('stage');
+  stage.addEventListener('pointerdown',function(e){if(e.target.tagName==='BUTTON'||e.target.tagName==='INPUT')return;jump();});
+  stage.addEventListener('pointerup',release);
+  document.getElementById('go').addEventListener('click',begin);
+  document.getElementById('again').addEventListener('click',begin);
+
+  /* ---------- share: copy the live link, fall back to a selectable field ---------- */
+  function shareDone(btn,ok,box){
+    var old=btn.getAttribute('data-l')||btn.textContent;btn.setAttribute('data-l',old);
+    if(ok){btn.textContent='Link copied';}
+    else{
+      var f=box.querySelector('.link');
+      if(!f){f=document.createElement('input');f.className='link';f.readOnly=true;f.value=LINK;f.setAttribute('aria-label','Game link');box.insertBefore(f,box.querySelector('.row'));}
+      f.focus();f.select();btn.textContent='Copy this link';
+    }
+    setTimeout(function(){btn.textContent=old},2200);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.share'),function(btn){
+    btn.addEventListener('click',function(){
+      var box=btn.closest('.overlay');
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(LINK).then(function(){shareDone(btn,true,box)},function(){shareDone(btn,false,box)});
+      }else shareDone(btn,false,box);
+    });
+  });
+
+  draw();
+  // keep the idle title screen alive
+  (function idle(){if(state!=='play'){draw();}setTimeout(function(){requestAnimationFrame(idle)},125);})();
+})();
+</script>
+</body>
+</html>
